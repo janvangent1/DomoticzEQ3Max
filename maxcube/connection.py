@@ -16,13 +16,24 @@ class MaxCubeConnection(object):
         try:
             if self.socket:
                 self.disconnect()
-        except:
-            logger.debug('Tried disconnecting from cube, caught Exception probably due to stale connection.')
+        except Exception as e:
+            logger.debug('Tried disconnecting from cube, caught Exception: ' + str(e))
 
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.settimeout(2)
-        self.socket.connect((self.host, self.port))
-        self.read()
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.settimeout(5)  # Increased timeout for better reliability
+            self.socket.connect((self.host, self.port))
+            logger.debug('Successfully connected to MAX! Cube')
+            self.read()
+        except socket.timeout:
+            logger.error('Connection timeout to MAX! Cube at ' + self.host + ':' + str(self.port))
+            raise
+        except socket.error as e:
+            logger.error('Socket error connecting to MAX! Cube: ' + str(e))
+            raise
+        except Exception as e:
+            logger.error('Unexpected error connecting to MAX! Cube: ' + str(e))
+            raise
 
     def read(self):
         buffer_size = 4096

@@ -114,75 +114,81 @@ class BasePlugin:
 
 
     def UpdateDevice(self, EQ3device, typename):
-        # Set default device values
-        nvalue = 0
-        battery = 255
-        # Set device-specific values
-        if typename == "Valve":
-            if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
-            devicetype = 243
-            if EQ3device.valve_position is not None:
-                svalue = str(EQ3device.valve_position)
-            else:
-                svalue = "0"
-        elif typename == "Thermostat":
-            if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
-            devicetype = 242
-            if EQ3device.target_temperature is not None:
-                svalue = str(EQ3device.target_temperature)
-            else:
-                svalue = "20.0"
-        elif typename == "Temperature":
-            devicetype = 80
-            if EQ3device.actual_temperature is not None:
-                svalue = str(EQ3device.actual_temperature)
-            else:
-                return  # Skip update if temperature is not available
-        elif typename == "Mode":
-            devicetype = 244
-            if EQ3device.mode is not None:
-                svalue = str(EQ3device.mode * 10)
-            else:
-                # Default to Auto mode (0) if mode is None
-                svalue = "0"    
-        elif typename == "Contact":
-            if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
-            devicetype = 244
-            if EQ3device.is_open == False:
-                svalue = "Off"
-            elif EQ3device.is_open == True:
-                svalue = "On"
-                nvalue = 1
+        try:
+            # Set default device values
+            nvalue = 0
+            battery = 255
+            # Set device-specific values
+            if typename == "Valve":
+                if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
+                devicetype = 243
+                if EQ3device.valve_position is not None:
+                    svalue = str(EQ3device.valve_position)
+                else:
+                    svalue = "0"
+            elif typename == "Thermostat":
+                if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
+                devicetype = 242
+                if EQ3device.target_temperature is not None:
+                    svalue = str(EQ3device.target_temperature)
+                else:
+                    svalue = "20.0"
+            elif typename == "Temperature":
+                devicetype = 80
+                if EQ3device.actual_temperature is not None:
+                    svalue = str(EQ3device.actual_temperature)
+                else:
+                    return  # Skip update if temperature is not available
+            elif typename == "Mode":
+                devicetype = 244
+                if EQ3device.mode is not None:
+                    svalue = str(EQ3device.mode * 10)
+                else:
+                    # Default to Auto mode (0) if mode is None
+                    svalue = "0"    
+            elif typename == "Contact":
+                if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
+                devicetype = 244
+                if EQ3device.is_open == False:
+                    svalue = "Off"
+                elif EQ3device.is_open == True:
+                    svalue = "On"
+                    nvalue = 1
 
-        # Find & update device if it matches and if it has changed
-        if EQ3device.rf_address is None:
-            return  # Skip if device has no RF address
-        for DOMdevice in Devices:
-            if Devices[DOMdevice].Type == devicetype and Devices[DOMdevice].DeviceID == EQ3device.rf_address: # Found!
-                if Devices[DOMdevice].sValue != svalue:
-                    Domoticz.Log(typename + " (" + Devices[DOMdevice].Name + ")")
-                    Devices[DOMdevice].Update(nValue=nvalue, sValue=svalue, BatteryLevel=battery)
-                break
+            # Find & update device if it matches and if it has changed
+            if EQ3device.rf_address is None:
+                return  # Skip if device has no RF address
+            for DOMdevice in Devices:
+                if Devices[DOMdevice].Type == devicetype and Devices[DOMdevice].DeviceID == EQ3device.rf_address: # Found!
+                    if Devices[DOMdevice].sValue != svalue:
+                        Domoticz.Log(typename + " (" + Devices[DOMdevice].Name + ")")
+                        Devices[DOMdevice].Update(nValue=nvalue, sValue=svalue, BatteryLevel=battery)
+                    break
+        except Exception as e:
+            Domoticz.Error("Error updating device " + typename + " for " + str(EQ3device.rf_address) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
 
 
     def onStart(self):
-        # Set heartbeat
-        self.skipbeats=int(Parameters["Mode5"])/30
-        self.beats=self.skipbeats
-        Domoticz.Heartbeat(30)
-
-        # Set debugging
-        if Parameters["Mode6"]=="True": 
-            Domoticz.Debugging(2)
-            Domoticz.Debug("Debugging mode activated")
-
-        # Read Cube for intialization of devices
-        Domoticz.Debug("Reading e-Q3 MAX! devices from Cube...")
         try:
-            cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
-        except:
-            Domoticz.Error("Error connecting to Cube. Other running MAX! programs may block the communication!")
-            return
+            # Set heartbeat
+            self.skipbeats=int(Parameters["Mode5"])/30
+            self.beats=self.skipbeats
+            Domoticz.Heartbeat(30)
+
+            # Set debugging
+            if Parameters["Mode6"]=="True": 
+                Domoticz.Debugging(2)
+                Domoticz.Debug("Debugging mode activated")
+
+            # Read Cube for intialization of devices
+            Domoticz.Debug("Reading e-Q3 MAX! devices from Cube...")
+            try:
+                cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                Domoticz.Debug("Successfully connected to MAX! Cube during startup")
+            except Exception as e:
+                Domoticz.Error("Error connecting to Cube during startup: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                Domoticz.Error("Cube Address: " + Parameters["Address"] + ", Port: " + Parameters["Port"])
+                return
         
         # Check which rooms have a wall mounterd thermostat
         max_room = 0
@@ -227,106 +233,131 @@ class BasePlugin:
         elif Parameters["Mode3"] == "False" and 255 in Devices:
             Devices[255].Delete()
             Domoticz.Log("Deleted heat demand switch")
+            
+        except Exception as e:
+            Domoticz.Error("Critical error in onStart: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+            Domoticz.Error("Plugin initialization failed - check MAX! Cube connection")
 
  
     def onCommand(self, Unit, Command, Level, Hue):
-        # Update commands for thermostats
-        if Devices[Unit].Type == 242 and Devices[Unit].sValue != str(Level):
-            Domoticz.Log("Setpoint changed for " + Devices[Unit].Name + ". New setpoint: " + str(Level))
-            try:
-                cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
-            except:
-                Domoticz.Error("Error connecting to Cube. Other running MAX! programs may block the communication!")
-                return
-            for EQ3device in cube.devices:
-                if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
-                    cube.set_target_temperature(EQ3device, Level)
-                    Devices[Unit].Update(nValue=0, sValue=str(Level))
-                    Devices[Unit].Refresh()
+        try:
+            # Update commands for thermostats
+            if Devices[Unit].Type == 242 and Devices[Unit].sValue != str(Level):
+                Domoticz.Log("Setpoint changed for " + Devices[Unit].Name + ". New setpoint: " + str(Level))
+                try:
+                    cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                except Exception as e:
+                    Domoticz.Error("Error connecting to Cube for setpoint command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    return
+                for EQ3device in cube.devices:
+                    if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
+                        cube.set_target_temperature(EQ3device, Level)
+                        Devices[Unit].Update(nValue=0, sValue=str(Level))
+                        Devices[Unit].Refresh()
 
-        # Update commands for mode switches
-        if Devices[Unit].Type == 244 and Devices[Unit].SubType == 62 and Devices[Unit].sValue != str(Level):
-            if Level == 00:
-                mode = 0
-                mode_text = "Auto"
-            elif Level == 10:
-                mode = 1
-                mode_text = "Manual"
-            elif Level == 20:
-                mode = 2
-                mode_text = "Vacation"
-            elif Level == 30:
-                mode = 3
-                mode_text = "Boost"
-            Domoticz.Log("Mode changed for " + Devices[Unit].Name + ". New mode: " + mode_text)
-            try:
-                cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
-            except:
-                Domoticz.Error("Error connecting to Cube. Other running MAX! programs may block the communication!")
-                return
-            for EQ3device in cube.devices:
-                if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
-                    cube.set_mode(EQ3device, mode)
-                    Devices[Unit].Update(nValue=0, sValue=str(Level))
-                    Devices[Unit].Refresh()
+            # Update commands for mode switches
+            if Devices[Unit].Type == 244 and Devices[Unit].SubType == 62 and Devices[Unit].sValue != str(Level):
+                if Level == 00:
+                    mode = 0
+                    mode_text = "Auto"
+                elif Level == 10:
+                    mode = 1
+                    mode_text = "Manual"
+                elif Level == 20:
+                    mode = 2
+                    mode_text = "Vacation"
+                elif Level == 30:
+                    mode = 3
+                    mode_text = "Boost"
+                Domoticz.Log("Mode changed for " + Devices[Unit].Name + ". New mode: " + mode_text)
+                try:
+                    cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                except Exception as e:
+                    Domoticz.Error("Error connecting to Cube for mode command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    return
+                for EQ3device in cube.devices:
+                    if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
+                        cube.set_mode(EQ3device, mode)
+                        Devices[Unit].Update(nValue=0, sValue=str(Level))
+                        Devices[Unit].Refresh()
+                        
+        except Exception as e:
+            Domoticz.Error("Error in onCommand for Unit " + str(Unit) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
 
 
     def onHeartbeat(self):
-        #Cancel the rest of this function if this heartbeat needs to be skipped
-        if self.beats < self.skipbeats:
-            Domoticz.Debug("Skipping heartbeat: " + str(self.beats))
-            self.beats += 1
-            return
-        self.beats=1
-
-        self.HeatDemand = 0
-
-        # Read data from Cube
-        Domoticz.Debug("Reading e-Q3 MAX! devices from Cube...")
         try:
-            cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
-        except:
-            Domoticz.Error("Error connecting to Cube. Other running MAX! programs may block the communication!")
-            return
+            #Cancel the rest of this function if this heartbeat needs to be skipped
+            if self.beats < self.skipbeats:
+                Domoticz.Debug("Skipping heartbeat: " + str(self.beats))
+                self.beats += 1
+                return
+            self.beats=1
 
-        # Update devices in Domoticz
-        for EQ3device in cube.devices:
-            # Skip devices with missing essential attributes
-            if EQ3device.rf_address is None or EQ3device.name is None or EQ3device.room_id is None:
-                Domoticz.Debug("Skipping device with missing attributes in heartbeat: rf_address=" + str(EQ3device.rf_address) + ", name=" + str(EQ3device.name) + ", room_id=" + str(EQ3device.room_id))
-                continue
-            device_name = EQ3device.name if EQ3device.name else "Unknown"
-            room_id = EQ3device.room_id if EQ3device.room_id is not None else "Unknown"
-            Domoticz.Debug("Checking device '" + device_name + "' in room " + str(room_id))
-            if cube.is_thermostat(EQ3device):
-                # Check if valve requires heat
-                if EQ3device.valve_position is not None and EQ3device.valve_position > int(Parameters["Mode4"]): 
-                    self.HeatDemand += 1
-                # Update Domoticz devices for radiator valves
-                self.UpdateDevice(EQ3device, "Valve")
-                if EQ3device.room_id is not None and not self.RoomHasThermostat[EQ3device.room_id]:
-                    self.UpdateDevice(EQ3device, "Thermostat")
-                    self.UpdateDevice(EQ3device, "Temperature")
-                    self.UpdateDevice(EQ3device, "Mode")
+            self.HeatDemand = 0
 
-            elif cube.is_wallthermostat(EQ3device):
-                # Update Domoticz devices for wall thermostats
-                self.UpdateDevice(EQ3device, "Thermostat")
-                self.UpdateDevice(EQ3device, "Temperature")
-                self.UpdateDevice(EQ3device, "Mode")
+            # Read data from Cube
+            Domoticz.Debug("Reading e-Q3 MAX! devices from Cube...")
+            try:
+                cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                Domoticz.Debug("Successfully connected to MAX! Cube")
+            except Exception as e:
+                Domoticz.Error("Error connecting to Cube: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                Domoticz.Error("Cube Address: " + Parameters["Address"] + ", Port: " + Parameters["Port"])
+                return
 
-            elif cube.is_windowshutter(EQ3device):
-                # Look up & update Domoticz device for contact switches
-                self.UpdateDevice(EQ3device, "Contact")
+            # Update devices in Domoticz
+            Domoticz.Debug("Processing " + str(len(cube.devices)) + " devices from MAX! Cube")
+            for EQ3device in cube.devices:
+                try:
+                    # Skip devices with missing essential attributes
+                    if EQ3device.rf_address is None or EQ3device.name is None or EQ3device.room_id is None:
+                        Domoticz.Debug("Skipping device with missing attributes in heartbeat: rf_address=" + str(EQ3device.rf_address) + ", name=" + str(EQ3device.name) + ", room_id=" + str(EQ3device.room_id))
+                        continue
+                    device_name = EQ3device.name if EQ3device.name else "Unknown"
+                    room_id = EQ3device.room_id if EQ3device.room_id is not None else "Unknown"
+                    Domoticz.Debug("Checking device '" + device_name + "' in room " + str(room_id))
+                    
+                    if cube.is_thermostat(EQ3device):
+                        # Check if valve requires heat
+                        if EQ3device.valve_position is not None and EQ3device.valve_position > int(Parameters["Mode4"]): 
+                            self.HeatDemand += 1
+                        # Update Domoticz devices for radiator valves
+                        self.UpdateDevice(EQ3device, "Valve")
+                        if EQ3device.room_id is not None and not self.RoomHasThermostat[EQ3device.room_id]:
+                            self.UpdateDevice(EQ3device, "Thermostat")
+                            self.UpdateDevice(EQ3device, "Temperature")
+                            self.UpdateDevice(EQ3device, "Mode")
 
-        # Update heat demand switch if necessary
-        Domoticz.Debug(str(self.HeatDemand) + " valves require heat")
-        if self.HeatDemand > 0 and Parameters["Mode3"] == "True" and 255 in Devices and Devices[255].sValue == "Off":
-            Devices[255].Update(nValue=1, sValue="On")
-            Domoticz.Log("Heat demand switch turned on")
-        elif self.HeatDemand == 0 and Parameters["Mode3"] == "True" and 255 in Devices and Devices[255].sValue == "On":
-            Devices[255].Update(nValue=0, sValue="Off")
-            Domoticz.Log("Heat demand switch turned off")
+                    elif cube.is_wallthermostat(EQ3device):
+                        # Update Domoticz devices for wall thermostats
+                        self.UpdateDevice(EQ3device, "Thermostat")
+                        self.UpdateDevice(EQ3device, "Temperature")
+                        self.UpdateDevice(EQ3device, "Mode")
+
+                    elif cube.is_windowshutter(EQ3device):
+                        # Look up & update Domoticz device for contact switches
+                        self.UpdateDevice(EQ3device, "Contact")
+                        
+                except Exception as e:
+                    Domoticz.Error("Error processing device " + str(EQ3device.rf_address) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    continue
+
+            # Update heat demand switch if necessary
+            try:
+                Domoticz.Debug(str(self.HeatDemand) + " valves require heat")
+                if self.HeatDemand > 0 and Parameters["Mode3"] == "True" and 255 in Devices and Devices[255].sValue == "Off":
+                    Devices[255].Update(nValue=1, sValue="On")
+                    Domoticz.Log("Heat demand switch turned on")
+                elif self.HeatDemand == 0 and Parameters["Mode3"] == "True" and 255 in Devices and Devices[255].sValue == "On":
+                    Devices[255].Update(nValue=0, sValue="Off")
+                    Domoticz.Log("Heat demand switch turned off")
+            except Exception as e:
+                Domoticz.Error("Error updating heat demand switch: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                
+        except Exception as e:
+            Domoticz.Error("Critical error in onHeartbeat: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+            Domoticz.Error("Heartbeat will be retried on next cycle")
 
 
 global _plugin
