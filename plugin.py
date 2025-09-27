@@ -156,6 +156,10 @@ class BasePlugin:
                     nvalue = 1
                 else:
                     svalue = "Off"  # Default to closed if is_open is None
+            else:
+                # Unknown device type - skip
+                Domoticz.Debug("Unknown device type: " + typename)
+                return
 
             # Find & update device if it matches and if it has changed
             if EQ3device.rf_address is None:
@@ -191,50 +195,50 @@ class BasePlugin:
                 Domoticz.Error("Error connecting to Cube during startup: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
                 Domoticz.Error("Cube Address: " + Parameters["Address"] + ", Port: " + Parameters["Port"])
                 return
-        
-        # Check which rooms have a wall mounterd thermostat
-        max_room = 0
-        for room in cube.rooms:
-            if room.id is not None and room.id > max_room: max_room = room.id
-        Domoticz.Debug("Number of rooms found: " + str((len(cube.rooms))) + " (highest number: " + str(max_room) + ")")
-        self.RoomHasThermostat=[False] * (max_room+1)
-        for EQ3device in cube.devices:
-            if cube.is_wallthermostat(EQ3device) and EQ3device.room_id is not None:
-                self.RoomHasThermostat[EQ3device.room_id] = True
-                room = cube.room_by_id(EQ3device.room_id)
-                room_name = room.name if room and room.name else "Unknown"
-                Domoticz.Debug("Room " + str(EQ3device.room_id) + " (" + room_name + ") has a thermostat")
+            
+            # Check which rooms have a wall mounterd thermostat
+            max_room = 0
+            for room in cube.rooms:
+                if room.id is not None and room.id > max_room: max_room = room.id
+            Domoticz.Debug("Number of rooms found: " + str((len(cube.rooms))) + " (highest number: " + str(max_room) + ")")
+            self.RoomHasThermostat=[False] * (max_room+1)
+            for EQ3device in cube.devices:
+                if cube.is_wallthermostat(EQ3device) and EQ3device.room_id is not None:
+                    self.RoomHasThermostat[EQ3device.room_id] = True
+                    room = cube.room_by_id(EQ3device.room_id)
+                    room_name = room.name if room and room.name else "Unknown"
+                    Domoticz.Debug("Room " + str(EQ3device.room_id) + " (" + room_name + ") has a thermostat")
 
-        # Create or delete devices if necessary
-        for EQ3device in cube.devices:
-            # Skip devices with missing essential attributes
-            if EQ3device.rf_address is None or EQ3device.name is None or EQ3device.room_id is None:
-                Domoticz.Debug("Skipping device with missing attributes: rf_address=" + str(EQ3device.rf_address) + ", name=" + str(EQ3device.name) + ", room_id=" + str(EQ3device.room_id))
-                continue
-            if cube.is_thermostat(EQ3device):
-                self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Valve")
-                if EQ3device.room_id is not None and not self.RoomHasThermostat[EQ3device.room_id]:
+            # Create or delete devices if necessary
+            for EQ3device in cube.devices:
+                # Skip devices with missing essential attributes
+                if EQ3device.rf_address is None or EQ3device.name is None or EQ3device.room_id is None:
+                    Domoticz.Debug("Skipping device with missing attributes: rf_address=" + str(EQ3device.rf_address) + ", name=" + str(EQ3device.name) + ", room_id=" + str(EQ3device.room_id))
+                    continue
+                if cube.is_thermostat(EQ3device):
+                    self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Valve")
+                    if EQ3device.room_id is not None and not self.RoomHasThermostat[EQ3device.room_id]:
+                        self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Thermostat")
+                        self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Temperature")
+                        self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Mode")
+                elif cube.is_wallthermostat(EQ3device):
                     self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Thermostat")
                     self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Temperature")
                     self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Mode")
-            elif cube.is_wallthermostat(EQ3device):
-                self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Thermostat")
-                self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Temperature")
-                self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Mode")
-            elif cube.is_windowshutter(EQ3device):
-                self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Contact")
+                elif cube.is_windowshutter(EQ3device):
+                    self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Contact")
 
-        # Create or delete heat demand switch if necessary
-        if Parameters["Mode3"] == "True" and 255 not in Devices:
-            Domoticz.Device(Name="Heat demand", Unit=255, TypeName="Switch", Image=9, Used=1).Create()
-            if 255 not in Devices:
-                Domoticz.Error("Heat demand switch could not be created. Is 'Accept new Hardware Devices' enabled under Settings?")
-            else:
-                Domoticz.Log("Created device '" + Parameters["Name"] + " - Heat demand'") 
-                Devices[255].Update(nValue=0, sValue="Off")
-        elif Parameters["Mode3"] == "False" and 255 in Devices:
-            Devices[255].Delete()
-            Domoticz.Log("Deleted heat demand switch")
+            # Create or delete heat demand switch if necessary
+            if Parameters["Mode3"] == "True" and 255 not in Devices:
+                Domoticz.Device(Name="Heat demand", Unit=255, TypeName="Switch", Image=9, Used=1).Create()
+                if 255 not in Devices:
+                    Domoticz.Error("Heat demand switch could not be created. Is 'Accept new Hardware Devices' enabled under Settings?")
+                else:
+                    Domoticz.Log("Created device '" + Parameters["Name"] + " - Heat demand'") 
+                    Devices[255].Update(nValue=0, sValue="Off")
+            elif Parameters["Mode3"] == "False" and 255 in Devices:
+                Devices[255].Delete()
+                Domoticz.Log("Deleted heat demand switch")
             
         except Exception as e:
             Domoticz.Error("Critical error in onStart: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
