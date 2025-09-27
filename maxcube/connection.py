@@ -21,7 +21,7 @@ class MaxCubeConnection(object):
 
         try:
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(5)  # Increased timeout for better reliability
+            self.socket.settimeout(10)  # Increased timeout for better reliability
             self.socket.connect((self.host, self.port))
             logger.debug('Successfully connected to MAX! Cube')
             self.read()

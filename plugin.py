@@ -49,7 +49,50 @@ from maxcube.connection import MaxCubeConnection
 class BasePlugin:
     enabled = False
     def __init__(self):
+        self.command_lock = False  # Simple lock to prevent concurrent commands
+        self.last_command_time = 0  # Track last command time for delays
         return
+
+    def safe_cube_command(self, command_func, *args, **kwargs):
+        """Execute cube commands safely with delays and retry logic"""
+        import time
+        
+        # Wait if another command is in progress
+        while self.command_lock:
+            Domoticz.Debug("Waiting for previous command to complete...")
+            time.sleep(0.5)
+        
+        # Set lock
+        self.command_lock = True
+        
+        try:
+            # Add delay between commands (minimum 2 seconds)
+            current_time = time.time()
+            if self.last_command_time > 0:
+                time_since_last = current_time - self.last_command_time
+                if time_since_last < 2.0:
+                    delay = 2.0 - time_since_last
+                    Domoticz.Debug("Waiting " + str(delay) + " seconds before next command...")
+                    time.sleep(delay)
+            
+            # Execute the command with retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    Domoticz.Debug("Executing cube command (attempt " + str(attempt + 1) + "/" + str(max_retries) + ")")
+                    result = command_func(*args, **kwargs)
+                    self.last_command_time = time.time()
+                    return result
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        Domoticz.Error("Command failed (attempt " + str(attempt + 1) + "): " + str(e) + " - Retrying...")
+                        time.sleep(1)  # Wait before retry
+                    else:
+                        Domoticz.Error("Command failed after " + str(max_retries) + " attempts: " + str(e))
+                        raise
+        finally:
+            # Always release the lock
+            self.command_lock = False
 
 
     def CheckDevice(self, name, deviceid, typename):
@@ -250,16 +293,26 @@ class BasePlugin:
             # Update commands for thermostats
             if Devices[Unit].Type == 242 and Devices[Unit].sValue != str(Level):
                 Domoticz.Log("Setpoint changed for " + Devices[Unit].Name + ". New setpoint: " + str(Level))
-                try:
+                
+                def set_temperature_command():
                     cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
-                except Exception as e:
-                    Domoticz.Error("Error connecting to Cube for setpoint command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
-                    return
-                for EQ3device in cube.devices:
-                    if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
-                        cube.set_target_temperature(EQ3device, Level)
+                    for EQ3device in cube.devices:
+                        if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
+                            cube.set_target_temperature(EQ3device, Level)
+                            return True
+                    return False
+                
+                try:
+                    success = self.safe_cube_command(set_temperature_command)
+                    if success:
                         Devices[Unit].Update(nValue=0, sValue=str(Level))
                         Devices[Unit].Refresh()
+                        Domoticz.Log("Successfully updated setpoint for " + Devices[Unit].Name)
+                    else:
+                        Domoticz.Error("Device not found for setpoint command: " + Devices[Unit].Name)
+                except Exception as e:
+                    Domoticz.Error("Error executing setpoint command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    return
 
             # Update commands for mode switches
             if Devices[Unit].Type == 244 and Devices[Unit].SubType == 62 and Devices[Unit].sValue != str(Level):
@@ -275,17 +328,31 @@ class BasePlugin:
                 elif Level == 30:
                     mode = 3
                     mode_text = "Boost"
-                Domoticz.Log("Mode changed for " + Devices[Unit].Name + ". New mode: " + mode_text)
-                try:
-                    cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
-                except Exception as e:
-                    Domoticz.Error("Error connecting to Cube for mode command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                else:
+                    Domoticz.Error("Unknown mode level: " + str(Level))
                     return
-                for EQ3device in cube.devices:
-                    if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
-                        cube.set_mode(EQ3device, mode)
+                    
+                Domoticz.Log("Mode changed for " + Devices[Unit].Name + ". New mode: " + mode_text)
+                
+                def set_mode_command():
+                    cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                    for EQ3device in cube.devices:
+                        if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
+                            cube.set_mode(EQ3device, mode)
+                            return True
+                    return False
+                
+                try:
+                    success = self.safe_cube_command(set_mode_command)
+                    if success:
                         Devices[Unit].Update(nValue=0, sValue=str(Level))
                         Devices[Unit].Refresh()
+                        Domoticz.Log("Successfully updated mode for " + Devices[Unit].Name)
+                    else:
+                        Domoticz.Error("Device not found for mode command: " + Devices[Unit].Name)
+                except Exception as e:
+                    Domoticz.Error("Error executing mode command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    return
                         
         except Exception as e:
             Domoticz.Error("Error in onCommand for Unit " + str(Unit) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
@@ -305,7 +372,12 @@ class BasePlugin:
             # Read data from Cube
             Domoticz.Debug("Reading e-Q3 MAX! devices from Cube...")
             try:
-                cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                # Use safe connection with timeout
+                def read_cube_data():
+                    cube = MaxCube(MaxCubeConnection(Parameters["Address"], int(Parameters["Port"])))
+                    return cube
+                
+                cube = self.safe_cube_command(read_cube_data)
                 Domoticz.Debug("Successfully connected to MAX! Cube")
             except Exception as e:
                 Domoticz.Error("Error connecting to Cube: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
