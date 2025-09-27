@@ -154,6 +154,8 @@ class BasePlugin:
                 elif EQ3device.is_open == True:
                     svalue = "On"
                     nvalue = 1
+                else:
+                    svalue = "Off"  # Default to closed if is_open is None
 
             # Find & update device if it matches and if it has changed
             if EQ3device.rf_address is None:
