@@ -37,24 +37,30 @@ class MaxCube(MaxDevice):
         self.log()
 
     def log(self):
-        logger.info('Cube (rf=%s, firmware=%s)' % (self.rf_address, self.firmware_version))
+        logger.info('Cube (rf=%s, firmware=%s)' % (self.rf_address or 'Unknown', self.firmware_version or 'Unknown'))
         for device in self.devices:
             if self.is_thermostat(device):
+                room = self.room_by_id(device.room_id)
+                room_name = room.name if room and room.name else "Unknown"
                 logger.info('Thermostat (type=%s, rf=%s, room=%s, name=%s, mode=%s, min=%s, max=%s, actual=%s, target=%s, valve=%s)'
-                            % (device.type, device.rf_address, self.room_by_id(device.room_id).name, device.name,
+                            % (device.type, device.rf_address or 'Unknown', room_name, device.name or 'Unknown',
                                device.mode, device.min_temperature, device.max_temperature,
                                device.actual_temperature, device.target_temperature, device.valve_position))
             elif self.is_wallthermostat(device):
+                room = self.room_by_id(device.room_id)
+                room_name = room.name if room and room.name else "Unknown"
                 logger.info('WallThermostat (type=%s, rf=%s, room=%s, name=%s, min=%s, max=%s, actual=%s, target=%s)'
-                            % (device.type, device.rf_address, self.room_by_id(device.room_id).name, device.name,
+                            % (device.type, device.rf_address or 'Unknown', room_name, device.name or 'Unknown',
                                device.min_temperature, device.max_temperature,
                                device.actual_temperature, device.target_temperature))
             elif self.is_windowshutter(device):
+                room = self.room_by_id(device.room_id)
+                room_name = room.name if room and room.name else "Unknown"
                 logger.info('WindowShutter (type=%s, rf=%s, room=%s, name=%s, init=%s, open=%s)'
-                            % (device.type, device.rf_address, self.room_by_id(device.room_id).name, device.name,
+                            % (device.type, device.rf_address or 'Unknown', room_name, device.name or 'Unknown',
                                device.initialized, device.is_open))
             else:
-                logger.info('Device (rf=%s, name=%s' % (device.rf_address, device.name))
+                logger.info('Device (rf=%s, name=%s' % (device.rf_address or 'Unknown', device.name or 'Unknown'))
 
     def update(self):
         self.connection.connect()
@@ -249,14 +255,18 @@ class MaxCube(MaxDevice):
             logger.error('%s is no (wall-)thermostat!', thermostat.rf_address)
             return
 
-        self.set_temperature_mode(thermostat, temperature, thermostat.mode)
+        # Use current mode or default to automatic if mode is None
+        mode = thermostat.mode if thermostat.mode is not None else MAX_DEVICE_MODE_AUTOMATIC
+        self.set_temperature_mode(thermostat, temperature, mode)
 
     def set_mode(self, thermostat, mode):
         if not self.is_thermostat(thermostat) and not self.is_wallthermostat(thermostat):
             logger.error('%s is no (wall-)thermostat!', thermostat.rf_address)
             return
 
-        self.set_temperature_mode(thermostat, thermostat.target_temperature, mode)
+        # Use current target temperature or default to 20.0 if target_temperature is None
+        temperature = thermostat.target_temperature if thermostat.target_temperature is not None else 20.0
+        self.set_temperature_mode(thermostat, temperature, mode)
 
     def set_temperature_mode(self, thermostat, temperature, mode):
         logger.debug('Setting temperature %s and mode %s on %s!', temperature, mode, thermostat.rf_address)
@@ -266,8 +276,17 @@ class MaxCube(MaxDevice):
             return
 
         rf_address = thermostat.rf_address
-        room = str(thermostat.room_id)
-        if thermostat.room_id < 10:
+        if rf_address is None:
+            logger.error('Thermostat has no RF address!')
+            return
+        
+        room_id = thermostat.room_id
+        if room_id is None:
+            logger.error('Thermostat has no room ID!')
+            return
+            
+        room = str(room_id)
+        if room_id < 10:
             room = '0' + room
         target_temperature = int(temperature * 2) + (mode << 6)
 

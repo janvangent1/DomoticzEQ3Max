@@ -119,22 +119,34 @@ class BasePlugin:
         battery = 255
         # Set device-specific values
         if typename == "Valve":
-            if EQ3device.battery: battery = 100-int(EQ3device.battery)*100
+            if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
             devicetype = 243
-            svalue = str(EQ3device.valve_position)
+            if EQ3device.valve_position is not None:
+                svalue = str(EQ3device.valve_position)
+            else:
+                svalue = "0"
         elif typename == "Thermostat":
-            if EQ3device.battery: battery = 100-int(EQ3device.battery)*100
+            if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
             devicetype = 242
-            svalue = str(EQ3device.target_temperature)
+            if EQ3device.target_temperature is not None:
+                svalue = str(EQ3device.target_temperature)
+            else:
+                svalue = "20.0"
         elif typename == "Temperature":
             devicetype = 80
-            svalue = str(EQ3device.actual_temperature)
-            if svalue == "None": return
+            if EQ3device.actual_temperature is not None:
+                svalue = str(EQ3device.actual_temperature)
+            else:
+                return  # Skip update if temperature is not available
         elif typename == "Mode":
             devicetype = 244
-            svalue = str(EQ3device.mode * 10)    
+            if EQ3device.mode is not None:
+                svalue = str(EQ3device.mode * 10)
+            else:
+                # Default to Auto mode (0) if mode is None
+                svalue = "0"    
         elif typename == "Contact":
-            if EQ3device.battery: battery = 100-int(EQ3device.battery)*100
+            if EQ3device.battery is not None: battery = 100-int(EQ3device.battery)*100
             devicetype = 244
             if EQ3device.is_open == False:
                 svalue = "Off"
@@ -143,6 +155,8 @@ class BasePlugin:
                 nvalue = 1
 
         # Find & update device if it matches and if it has changed
+        if EQ3device.rf_address is None:
+            return  # Skip if device has no RF address
         for DOMdevice in Devices:
             if Devices[DOMdevice].Type == devicetype and Devices[DOMdevice].DeviceID == EQ3device.rf_address: # Found!
                 if Devices[DOMdevice].sValue != svalue:
@@ -173,19 +187,25 @@ class BasePlugin:
         # Check which rooms have a wall mounterd thermostat
         max_room = 0
         for room in cube.rooms:
-            if room.id > max_room: max_room = room.id
+            if room.id is not None and room.id > max_room: max_room = room.id
         Domoticz.Debug("Number of rooms found: " + str((len(cube.rooms))) + " (highest number: " + str(max_room) + ")")
         self.RoomHasThermostat=[False] * (max_room+1)
         for EQ3device in cube.devices:
-            if cube.is_wallthermostat(EQ3device):
+            if cube.is_wallthermostat(EQ3device) and EQ3device.room_id is not None:
                 self.RoomHasThermostat[EQ3device.room_id] = True
-                Domoticz.Debug("Room " + str(EQ3device.room_id) + " (" + cube.room_by_id(EQ3device.room_id).name + ") has a thermostat")
+                room = cube.room_by_id(EQ3device.room_id)
+                room_name = room.name if room and room.name else "Unknown"
+                Domoticz.Debug("Room " + str(EQ3device.room_id) + " (" + room_name + ") has a thermostat")
 
         # Create or delete devices if necessary
         for EQ3device in cube.devices:
+            # Skip devices with missing essential attributes
+            if EQ3device.rf_address is None or EQ3device.name is None or EQ3device.room_id is None:
+                Domoticz.Debug("Skipping device with missing attributes: rf_address=" + str(EQ3device.rf_address) + ", name=" + str(EQ3device.name) + ", room_id=" + str(EQ3device.room_id))
+                continue
             if cube.is_thermostat(EQ3device):
                 self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Valve")
-                if not self.RoomHasThermostat[EQ3device.room_id]:
+                if EQ3device.room_id is not None and not self.RoomHasThermostat[EQ3device.room_id]:
                     self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Thermostat")
                     self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Temperature")
                     self.CheckDevice(EQ3device.name, EQ3device.rf_address, "Mode")
@@ -219,7 +239,7 @@ class BasePlugin:
                 Domoticz.Error("Error connecting to Cube. Other running MAX! programs may block the communication!")
                 return
             for EQ3device in cube.devices:
-                if Devices[Unit].DeviceID == EQ3device.rf_address:
+                if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
                     cube.set_target_temperature(EQ3device, Level)
                     Devices[Unit].Update(nValue=0, sValue=str(Level))
                     Devices[Unit].Refresh()
@@ -245,7 +265,7 @@ class BasePlugin:
                 Domoticz.Error("Error connecting to Cube. Other running MAX! programs may block the communication!")
                 return
             for EQ3device in cube.devices:
-                if Devices[Unit].DeviceID == EQ3device.rf_address:
+                if EQ3device.rf_address is not None and Devices[Unit].DeviceID == EQ3device.rf_address:
                     cube.set_mode(EQ3device, mode)
                     Devices[Unit].Update(nValue=0, sValue=str(Level))
                     Devices[Unit].Refresh()
@@ -271,13 +291,20 @@ class BasePlugin:
 
         # Update devices in Domoticz
         for EQ3device in cube.devices:
-            Domoticz.Debug("Checking device '" + EQ3device.name + "' in room " + str(EQ3device.room_id))
+            # Skip devices with missing essential attributes
+            if EQ3device.rf_address is None or EQ3device.name is None or EQ3device.room_id is None:
+                Domoticz.Debug("Skipping device with missing attributes in heartbeat: rf_address=" + str(EQ3device.rf_address) + ", name=" + str(EQ3device.name) + ", room_id=" + str(EQ3device.room_id))
+                continue
+            device_name = EQ3device.name if EQ3device.name else "Unknown"
+            room_id = EQ3device.room_id if EQ3device.room_id is not None else "Unknown"
+            Domoticz.Debug("Checking device '" + device_name + "' in room " + str(room_id))
             if cube.is_thermostat(EQ3device):
                 # Check if valve requires heat
-                if EQ3device.valve_position > int(Parameters["Mode4"]): self.HeatDemand += 1
+                if EQ3device.valve_position is not None and EQ3device.valve_position > int(Parameters["Mode4"]): 
+                    self.HeatDemand += 1
                 # Update Domoticz devices for radiator valves
                 self.UpdateDevice(EQ3device, "Valve")
-                if not self.RoomHasThermostat[EQ3device.room_id]:
+                if EQ3device.room_id is not None and not self.RoomHasThermostat[EQ3device.room_id]:
                     self.UpdateDevice(EQ3device, "Thermostat")
                     self.UpdateDevice(EQ3device, "Temperature")
                     self.UpdateDevice(EQ3device, "Mode")
