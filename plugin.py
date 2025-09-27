@@ -1,5 +1,5 @@
 """
-<plugin key="eq3max" name="eQ-3 MAX!" author="mvzut" version="0.6.6" wikilink="https://github.com/mvzut/maxcube-Domoticz-plugin" externallink="https://www.domoticz.com/forum/viewtopic.php?f=34&amp;t=25081">
+<plugin key="eq3max" name="eQ-3 MAX!" author="janvangent1" version="0.6.7" wikilink="https://github.com/janvangent1/DomoticzEQ3Max" externallink="https://github.com/janvangent1/DomoticzEQ3Max">
     <params>
         <param field="Address" label="Cube address" width="110px" required="true" default="192.168.0.1"/>
         <param field="Port" label="Cube port" width="50px" required="true" default="62910"/>
