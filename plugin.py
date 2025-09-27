@@ -43,6 +43,10 @@
 
 
 import Domoticz
+import traceback
+import sys
+import time
+import threading
 from maxcube.cube import MaxCube
 from maxcube.connection import MaxCubeConnection
 
@@ -51,7 +55,60 @@ class BasePlugin:
     def __init__(self):
         self.command_lock = False  # Simple lock to prevent concurrent commands
         self.last_command_time = 0  # Track last command time for delays
+        self.thread_health = {
+            'last_heartbeat': 0,
+            'heartbeat_count': 0,
+            'error_count': 0,
+            'last_error': None,
+            'connection_failures': 0,
+            'command_failures': 0
+        }
+        self.start_time = time.time()
         return
+
+    def log_thread_health(self, operation):
+        """Log detailed thread health information"""
+        current_time = time.time()
+        uptime = current_time - self.start_time
+        
+        Domoticz.Debug("=== THREAD HEALTH DIAGNOSTIC ===")
+        Domoticz.Debug("Operation: " + operation)
+        Domoticz.Debug("Uptime: " + str(int(uptime)) + " seconds")
+        Domoticz.Debug("Heartbeat Count: " + str(self.thread_health['heartbeat_count']))
+        Domoticz.Debug("Error Count: " + str(self.thread_health['error_count']))
+        Domoticz.Debug("Connection Failures: " + str(self.thread_health['connection_failures']))
+        Domoticz.Debug("Command Failures: " + str(self.thread_health['command_failures']))
+        Domoticz.Debug("Command Lock: " + str(self.command_lock))
+        Domoticz.Debug("Last Command Time: " + str(self.last_command_time))
+        Domoticz.Debug("Thread ID: " + str(threading.current_thread().ident))
+        Domoticz.Debug("Thread Name: " + str(threading.current_thread().name))
+        if self.thread_health['last_error']:
+            Domoticz.Debug("Last Error: " + str(self.thread_health['last_error']))
+        Domoticz.Debug("================================")
+
+    def log_detailed_error(self, error, context=""):
+        """Log detailed error information with stack trace"""
+        self.thread_health['error_count'] += 1
+        self.thread_health['last_error'] = str(error)
+        
+        Domoticz.Error("=== DETAILED ERROR REPORT ===")
+        Domoticz.Error("Context: " + context)
+        Domoticz.Error("Error Type: " + str(type(error).__name__))
+        Domoticz.Error("Error Message: " + str(error))
+        Domoticz.Error("Thread ID: " + str(threading.current_thread().ident))
+        Domoticz.Error("Thread Name: " + str(threading.current_thread().name))
+        
+        # Log stack trace
+        try:
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            if exc_traceback:
+                Domoticz.Error("Stack Trace:")
+                for line in traceback.format_tb(exc_traceback):
+                    Domoticz.Error("  " + line.strip())
+        except Exception as e:
+            Domoticz.Error("Could not capture stack trace: " + str(e))
+        
+        Domoticz.Error("=============================")
 
     def safe_cube_command(self, command_func, *args, **kwargs):
         """Execute cube commands safely with delays and retry logic"""
@@ -84,11 +141,14 @@ class BasePlugin:
                     self.last_command_time = time.time()
                     return result
                 except Exception as e:
+                    self.thread_health['command_failures'] += 1
                     if attempt < max_retries - 1:
                         Domoticz.Error("Command failed (attempt " + str(attempt + 1) + "): " + str(e) + " - Retrying...")
+                        self.log_detailed_error(e, "Command retry attempt " + str(attempt + 1))
                         time.sleep(1)  # Wait before retry
                     else:
                         Domoticz.Error("Command failed after " + str(max_retries) + " attempts: " + str(e))
+                        self.log_detailed_error(e, "Command failed after all retries")
                         raise
         finally:
             # Always release the lock
@@ -215,6 +275,7 @@ class BasePlugin:
                     break
         except Exception as e:
             Domoticz.Error("Error updating device " + typename + " for " + str(EQ3device.rf_address) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+            self.log_detailed_error(e, "UpdateDevice error for " + typename + " device " + str(EQ3device.rf_address))
 
 
     def onStart(self):
@@ -286,6 +347,7 @@ class BasePlugin:
         except Exception as e:
             Domoticz.Error("Critical error in onStart: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
             Domoticz.Error("Plugin initialization failed - check MAX! Cube connection")
+            self.log_detailed_error(e, "Critical onStart error - plugin initialization failed")
 
  
     def onCommand(self, Unit, Command, Level, Hue):
@@ -312,6 +374,7 @@ class BasePlugin:
                         Domoticz.Error("Device not found for setpoint command: " + Devices[Unit].Name)
                 except Exception as e:
                     Domoticz.Error("Error executing setpoint command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    self.log_detailed_error(e, "Setpoint command execution error")
                     return
 
             # Update commands for mode switches
@@ -352,14 +415,24 @@ class BasePlugin:
                         Domoticz.Error("Device not found for mode command: " + Devices[Unit].Name)
                 except Exception as e:
                     Domoticz.Error("Error executing mode command: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    self.log_detailed_error(e, "Mode command execution error")
                     return
                         
         except Exception as e:
             Domoticz.Error("Error in onCommand for Unit " + str(Unit) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+            self.log_detailed_error(e, "onCommand error for Unit " + str(Unit))
 
 
     def onHeartbeat(self):
         try:
+            # Update thread health tracking
+            self.thread_health['last_heartbeat'] = time.time()
+            self.thread_health['heartbeat_count'] += 1
+            
+            # Log thread health every 10 heartbeats for monitoring
+            if self.thread_health['heartbeat_count'] % 10 == 0:
+                self.log_thread_health("Heartbeat #" + str(self.thread_health['heartbeat_count']))
+            
             #Cancel the rest of this function if this heartbeat needs to be skipped
             if self.beats < self.skipbeats:
                 Domoticz.Debug("Skipping heartbeat: " + str(self.beats))
@@ -380,8 +453,10 @@ class BasePlugin:
                 cube = self.safe_cube_command(read_cube_data)
                 Domoticz.Debug("Successfully connected to MAX! Cube")
             except Exception as e:
+                self.thread_health['connection_failures'] += 1
                 Domoticz.Error("Error connecting to Cube: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
                 Domoticz.Error("Cube Address: " + Parameters["Address"] + ", Port: " + Parameters["Port"])
+                self.log_detailed_error(e, "Cube connection failure")
                 return
 
             # Update devices in Domoticz
@@ -419,6 +494,7 @@ class BasePlugin:
                         
                 except Exception as e:
                     Domoticz.Error("Error processing device " + str(EQ3device.rf_address) + ": " + str(e) + " (Type: " + str(type(e).__name__) + ")")
+                    self.log_detailed_error(e, "Device processing error for " + str(EQ3device.rf_address))
                     continue
 
             # Update heat demand switch if necessary
@@ -436,6 +512,12 @@ class BasePlugin:
         except Exception as e:
             Domoticz.Error("Critical error in onHeartbeat: " + str(e) + " (Type: " + str(type(e).__name__) + ")")
             Domoticz.Error("Heartbeat will be retried on next cycle")
+            self.log_detailed_error(e, "Critical onHeartbeat error - thread may crash")
+            
+            # Log final thread health before potential crash
+            Domoticz.Error("=== THREAD STATE BEFORE POTENTIAL CRASH ===")
+            self.log_thread_health("Critical error occurred")
+            Domoticz.Error("==========================================")
 
 
 global _plugin
